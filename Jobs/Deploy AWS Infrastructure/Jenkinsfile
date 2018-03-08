@@ -1,0 +1,221 @@
+script {
+	// Array to hold our environmental variables
+	// We do this to avoid trigger a Jenkins sandbox violation
+	custom_env = []
+
+	// Loading in the order they appear
+	// .properties is appended
+	property_files = [ 'common', 'aws' ]
+
+	// Default terminal type
+	terminal_type = 'xterm'
+
+	repos = [
+		deployment: [
+			dir: 'Cloudfoundry-Deployment',
+			url: env.CLOUDFOUNDRY_DEPLOYMENT_REPO
+		],
+		orchestration: [
+			dir: 'Orchestration',
+			url: env.CLOUDFOUNDRY_ORCHESTRATION_REPO
+		],
+		config: [
+			dir: 'Config',
+			url: env.CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_REPO
+		]
+	]
+}
+
+properties([
+	disableResume(),
+	buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '10', numToKeepStr: '10')),
+	parameters([
+		string(
+			name: 'DEPLOYMENT_NAME',
+			description: 'AWS Deployment Name',
+			defaultValue: ''
+		),
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+			description: 'Deployment Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			type: 'PT_BRANCH',
+			useRepository: repos.deployment.url
+		],
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+			description: 'Orchestration Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			tagFilter: '*',
+			type: 'PT_BRANCH',
+			useRepository: repos.orchestration.url
+		],
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+			description: 'Configuration Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			tagFilter: '*',
+			type: 'PT_BRANCH',
+			useRepository: repos.config.url
+		],
+		booleanParam(
+			name: 'CREATE_DEPLOYMENT',
+			description: 'Create new deployment or untick to update existing deployment',
+			defaultValue: true
+		),
+		choice(
+			name: 'AWS_REGION',
+			choices: 'eu-central-1\neu-west-1\neu-west-2\neu-west-3',
+			description: 'AWS default region. If selecting the MULTI_AZ option, there MUST be three availability zones in this region'
+		),
+		choice(
+			name: 'AVAILABILITY',
+			choices: 'SingleAZ\nSingleAZ-HA\nMultiAZ',
+			description: 'Availability type. This is ignored for existing deployments unless IGNORE_EXISTING_AVAILABILITY_CONFIG is set'
+		),
+		booleanParam(
+			name: 'IGNORE_EXISTING_AWS_CONFIG',
+			description: 'Ignore any existing AWS outputs',
+			defaultValue: false
+		),
+		booleanParam(
+			name: 'IGNORE_EXISTING_AVAILABILITY_CONFIG',
+			description: 'Ignore any existing available zone configuration - this should allow conversion from multi<->single AZ',
+			defaultValue: false
+		),
+		booleanParam(
+			name: 'IGNORE_EXISTING_PASSWORDS',
+			description: 'Ignore any existing passwords',
+			defaultValue: false
+		),
+		booleanParam(
+			name: 'IGNORE_EXISTING_PARAMETERS',
+			defaultValue: false,
+			description: 'Ignore any existing deployment parameters.  Excludes availability and password settings.'
+		),
+		booleanParam(
+			name: 'DEBUG',
+			description: 'Run in debug mode',
+			defaultValue: false
+		)
+	])
+])
+
+node('master'){
+	stage('Ensure clean workspace'){
+		// We clean the entire workspace, otherwise we end up with a dirty workspace, even if the checkout dirs under that workspace are clean
+		// We clean before we start in case there are left overs from the previous build, if we clean after a build completes, we may not always
+		// clean if the build fails
+		deleteDir()
+	}
+
+	stage("Checking out $repos.deployment.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH ]],
+			extensions: [
+				// We want to be able to check things back in
+				[ $class: 'LocalBranch' ],
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.deployment.dir
+				],
+				[
+					$class: 'SubmoduleOption',
+					recursiveSubmodules: true,
+					disableSubmodules: false,
+					parentCredentials: false
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.deployment.url
+			]]
+		)
+	}
+	stage("Checking out $repos.orchestration.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_ORCHESTRATION_BRANCH ]],
+			extensions: [
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.orchestration.dir
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.orchestration.url
+			]]
+		)
+	}
+	stage("Checking out $repos.config.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH ]],
+			extensions: [
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.config.dir
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.config.url
+			]]
+		)
+	}
+
+	// This needs to come after the checkout, otherwise the GitSCM parameter plugin doesn't know about the repos
+	stage('Check Parameters'){
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/(devtest|prunes)$'){
+			error("Foot protection triggered: refusing to build $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH")
+		}
+
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/master$' && ! params.DEPLOYMENT_NAME){
+			error("Unable to deploy from $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH without a \$DEPLOYMENT_NAME")
+		}
+	}
+
+	for(String property_file : property_files){
+		if(fileExists("$repos.config.dir/${property_file}.properties")){
+			stage("Loading ${property_file}.properties file"){
+				// Load properties and turn them into environmental variables
+				// Requires approval from Jenkins > Manage jenkins > In-process Script Approval
+				readProperties(file: "$repos.config.dir/${property_file}.properties").each{
+					k, v -> custom_env.add("$k=$v")
+				}
+			}
+		}
+	}
+
+	stage('Deploy Infrastructure'){
+		withEnv(["TERM=$terminal_type"] + custom_env){
+			ansiColor(terminal_type){
+				dir(repos.deployment.dir){
+					sh "../$repos.orchestration.dir/aws/deploy_aws_infrastructure.sh"
+				}
+			}
+		}
+	}
+
+	stage('Clean Workspace'){
+		echo 'Add clean workspace option'
+	}
+}
+

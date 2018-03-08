@@ -1,0 +1,230 @@
+
+script {
+	// Array to hold our environmental variables
+	// We do this to avoid trigger a Jenkins sandbox violation
+	custom_env = []
+
+	// Loading in the order they appear
+	// .properties is appended
+	property_files = [ 'common', 'cf' ]
+
+	// Default terminal type
+	terminal_type = 'xterm'
+
+	repos = [
+		deployment: [
+			dir: 'Cloudfoundry-Deployment',
+			url: env.CLOUDFOUNDRY_DEPLOYMENT_REPO
+		],
+		orchestration: [
+			dir: 'Orchestration',
+			url: env.CLOUDFOUNDRY_ORCHESTRATION_REPO
+		],
+		config: [
+			dir: 'Config',
+			url: env.CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_REPO
+		]
+	]
+
+}
+
+properties([
+	disableResume(),
+	buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '10', numToKeepStr: '10')),
+	parameters([
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+			description: 'Deployment Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			type: 'PT_BRANCH',
+			useRepository: repos.deployment.url
+		],
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+			description: 'Orchestration Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			tagFilter: '*',
+			type: 'PT_BRANCH',
+			useRepository: repos.orchestration.url
+		],
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+			description: 'Configuration Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			tagFilter: '*',
+			type: 'PT_BRANCH',
+			useRepository: repos.config.url
+		],
+		booleanParam(
+			name: 'IGNORE_EXISTING',
+			description: 'Ignore existing brokers',
+			defaultValue: true,
+		),
+		booleanParam(
+			name: 'DEBUG',
+			description: 'Run in debug mode',
+			defaultValue: false
+		)
+	])
+])
+
+node('master'){
+	stage('Ensure clean workspace'){
+		// We clean the entire workspace, otherwise we end up with a dirty workspace, even if the checkout dirs under that workspace are clean
+		// We clean before we start in case there are left overs from the previous build, if we clean after a build completes, we may not always
+		// clean if the build fails
+		deleteDir()
+	}
+
+	stage("Checking out $repos.deployment.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH ]],
+			extensions: [
+				// We want to be able to check things back in
+				[ $class: 'LocalBranch' ],
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.deployment.dir
+				],
+				[
+					$class: 'SubmoduleOption',
+					recursiveSubmodules: true,
+					disableSubmodules: false,
+					parentCredentials: false
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.deployment.url
+			]]
+		)
+	}
+	stage("Checking out $repos.orchestration.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_ORCHESTRATION_BRANCH ]],
+			extensions: [
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.orchestration.dir
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.orchestration.url
+			]]
+		)
+	}
+	stage("Checking out $repos.config.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH ]],
+			extensions: [
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.config.dir
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.config.url
+			]]
+		)
+	}
+
+	// This needs to come after the checkout, otherwise the GitSCM parameter plugin doesn't know about the repos
+	stage('Check Parameters'){
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/(devtest|prunes)$'){
+			error("Foot protection triggered: refusing to build $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH")
+		}
+
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/master$'){
+			error("Unable to deploy from $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH - please choose an existing deployment branch")
+		}
+	}
+
+	for(String property_file : property_files){
+		if(fileExists("$repos.config.dir/${property_file}.properties")){
+			stage("Loading ${property_file}.properties file"){
+				// Load properties and turn them into environmental variables
+				// Requires approval from Jenkins > Manage jenkins > In-process Script Approval
+				readProperties(file: "$repos.config.dir/${property_file}.properties").each{
+					k, v -> custom_env.add("$k=$v")
+				}
+			}
+		}
+	}
+
+	stage('Copy Bosh CLI'){
+		try {
+			params['UPDATE_ARTIFACTS'] && error('Updating artifacts')
+
+			copyArtifacts(
+				filter: "$repos.deployment.dir/work/bin/bosh",
+				projectName: 'Install Dependencies',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}catch(error){
+			build(
+				job: 'Install Dependencies',
+				parameters: [
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+						value: params['CLOUDFOUNDRY_DEPLOYMENT_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH']
+					],
+					booleanParam(
+						name: 'DEBUG',
+						value: params['DEBUG']
+					)
+				]
+			)
+
+			// Copy over the missing/updated artifacts
+			copyArtifacts(
+				filter: "$repos.deployment.dir/work/bin/bosh",
+				projectName: 'Install Dependencies',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}
+	}
+
+	stage('Delete Cloudfoundry'){
+		withEnv(["TERM=$terminal_type"] + custom_env){
+			ansiColor(terminal_type){
+				dir(repos.deployment.dir){
+					sh "../$repos.orchestration.dir/cf/delete_cloudfoundry.sh"
+				}
+			}
+		}
+	}
+}
+

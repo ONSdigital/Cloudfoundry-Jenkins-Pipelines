@@ -1,0 +1,424 @@
+
+script {
+	// Array to hold our environmental variables
+	// We do this to avoid trigger a Jenkins sandbox violation
+	custom_env = []
+
+	// Loading in the order they appear
+	// .properties is appended
+	property_files = [ 'common', 'cf' ]
+
+	// Default terminal type
+	terminal_type = 'xterm'
+
+	repos = [
+		deployment: [
+			dir: 'Cloudfoundry-Deployment',
+			url: env.CLOUDFOUNDRY_DEPLOYMENT_REPO
+		],
+		orchestration: [
+			dir: 'Orchestration',
+			url: env.CLOUDFOUNDRY_ORCHESTRATION_REPO
+		],
+		config: [
+			dir: 'Config',
+			url: env.CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_REPO
+		]
+	]
+
+}
+
+properties([
+	disableResume(),
+	buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '10', numToKeepStr: '10')),
+	parameters([
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+			description: 'Deployment Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			type: 'PT_BRANCH',
+			useRepository: repos.deployment.url
+		],
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+			description: 'Orchestration Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			tagFilter: '*',
+			type: 'PT_BRANCH',
+			useRepository: repos.orchestration.url
+		],
+		[
+			$class: 'GitParameterDefinition',
+			name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+			description: 'Configuration Branch',
+			branch: '',
+			branchFilter: '.*',
+			defaultValue: 'origin/master',
+			quickFilterEnabled: false,
+			selectedValue: 'DEFAULT',
+			sortMode: 'ASCENDING_SMART',
+			tagFilter: '*',
+			type: 'PT_BRANCH',
+			useRepository: repos.config.url
+		],
+		booleanParam(
+			name: 'UPGRADE_VERSIONS',
+			description: 'Upgrade an existing deployment to the latest avaialble versions.  If you want to update to a specific version, just set that version below and ignore this option',
+			defaultValue: false
+		),
+		string(
+			name: 'CF_VERSION',
+			description: 'CF release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'DIEGO_VERSION',
+			description: 'Diego release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'CFLINUXFS2_ROOTFS_VERSION',
+			description: 'CFLinuxFS2 release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'GARDEN_RUNC_VERSION',
+			description: 'Garden Runc release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'CF_RABBITMQ_VERSION',
+			description: 'RabbitMQ release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'CF_RABBITMQ_MULTITENANT_BROKER_VERSION',
+			description: 'RabbitMQ Multitentant Broker release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'CF_SMOKE_TESTS_VERSION',
+			description: 'CF Smoke Tests release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		string(
+			name: 'BOSH_STEMCELL_VERSION',
+			description: 'RabbitMQ Multitentant Broker release version - not required, unless you need to pin to a specific version',
+			defaultValue: ''
+		),
+		booleanParam(
+			name: 'DELETE_BOSH_STATE',
+			description: 'Delete existing Bosh Lite state file (tick this if you have manually removed the Bosh Lite instance)',
+			defaultValue: false
+		),
+		booleanParam(
+			name: 'REGENERATE_BOSH_ENV',
+			description: 'Regenerate Bosh initial environment (e.g. bosh create-env)',
+			defaultValue: false
+		),
+		booleanParam(
+			name: 'REGENERATE_NETWORKS_CONFIG',
+			description: 'Regenerate network configuration',
+			defaultValue: false
+		),
+		booleanParam(
+			name: 'NO_CREATE_RELEASES',
+			description: 'Do not create releases, this overrides the RECREATE_RELEASES option',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'RECREATE_RELEASES',
+			description: 'Re-create release',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'DELETE_BOSH_ENV',
+			description: 'Delete existing Bosh environment',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'REUPLOAD_STEMCELL',
+			description: 'Re-upload Bosh stemcells',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'UPDATE_ARTIFACTS',
+			description: 'Re-run the "Install Dependencies" job',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'UPDATE_DOWNLOADS_BLOBS',
+			description: 'Re-run the "Download Release Blobs" job',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'UPDATE_BUILD_BLOBS',
+			description: 'Re-run the "Build Release Blobs" job',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'SKIP_CF_SETUP',
+			description: 'Skip setting up Cloud Foundry (eg admin user, brokers)',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'SKIP_POST_DEPLOY_ERRANDS',
+			description: 'Skip post deployment errands',
+			defaultValue: false,
+		),
+		booleanParam(
+			name: 'IGNORE_EXISTING',
+			description: 'Ignore existing brokers',
+			defaultValue: true,
+		),
+		booleanParam(
+			name: 'DEBUG',
+			description: 'Run in debug mode',
+			defaultValue: false
+		)
+	])
+])
+
+node('master'){
+	stage('Ensure clean workspace'){
+		// We clean the entire workspace, otherwise we end up with a dirty workspace, even if the checkout dirs under that workspace are clean
+		// We clean before we start in case there are left overs from the previous build, if we clean after a build completes, we may not always
+		// clean if the build fails
+		deleteDir()
+	}
+
+	stage("Checking out $repos.deployment.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH ]],
+			extensions: [
+				// We want to be able to check things back in
+				[ $class: 'LocalBranch' ],
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.deployment.dir
+				],
+				[
+					$class: 'SubmoduleOption',
+					recursiveSubmodules: true,
+					disableSubmodules: false,
+					parentCredentials: false
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.deployment.url
+			]]
+		)
+	}
+	stage("Checking out $repos.orchestration.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_ORCHESTRATION_BRANCH ]],
+			extensions: [
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.orchestration.dir
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.orchestration.url
+			]]
+		)
+	}
+	stage("Checking out $repos.config.dir"){
+		checkout(
+			$class: 'GitSCM',
+			branches: [[ name: params.CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH ]],
+			extensions: [
+				[
+					$class: 'RelativeTargetDirectory',
+					relativeTargetDir: repos.config.dir
+				]
+			],
+			userRemoteConfigs: [[
+				url: repos.config.url
+			]]
+		)
+	}
+
+	// This needs to come after the checkout, otherwise the GitSCM parameter plugin doesn't know about the repos
+	stage('Check Parameters'){
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/(devtest|prunes)$'){
+			error("Foot protection triggered: refusing to build $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH")
+		}
+
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/master$'){
+			error("Unable to deploy from $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH - please choose an existing deployment branch")
+		}
+	}
+
+	for(String property_file : property_files){
+		if(fileExists("$repos.config.dir/${property_file}.properties")){
+			stage("Loading ${property_file}.properties file"){
+				// Load properties and turn them into environmental variables
+				// Requires approval from Jenkins > Manage jenkins > In-process Script Approval
+				readProperties(file: "$repos.config.dir/${property_file}.properties").each{
+					k, v -> custom_env.add("$k=$v")
+				}
+			}
+		}
+	}
+
+	stage('Copy artifacts'){
+		try {
+			params['UPDATE_ARTIFACTS'] && error('Updating artifacts')
+
+			copyArtifacts(
+				filter: "$repos.deployment.dir/work/bin/bosh,$repos.deployment.dir/work/bin/cf",
+				projectName: 'Install Dependencies',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}catch(error){
+			build(
+				job: 'Install Dependencies',
+				parameters: [
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+						value: params['CLOUDFOUNDRY_DEPLOYMENT_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH']
+					],
+					booleanParam(
+						name: 'DEBUG',
+						value: params['DEBUG']
+					)
+				]
+			)
+
+			// Copy over the missing/updated artifacts
+			copyArtifacts(
+				filter: "$repos.deployment.dir/work/bin/bosh,$repos.deployment.dir/work/bin/cf",
+				projectName: 'Install Dependencies',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}
+	}
+
+	stage('Copy blobs'){
+		try{
+			params['UPDATE_BUILD_BLOBS'] && error('Updating build blobs')
+
+			copyArtifacts(
+				filter: "$repos.deployment.dir/blobs/**/*",
+				projectName: 'Build Release Blobs',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}catch(error){
+			build(
+				job: 'Build Release Blobs',
+				parameters: [
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+						value: params['CLOUDFOUNDRY_DEPLOYMENT_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH']
+					],
+					booleanParam(
+						name: 'DEBUG',
+						value: params['DEBUG']
+					)
+				]
+			)
+
+			// Copy over the missing/updated artifacts
+			copyArtifacts(
+				filter: "$repos.deployment.dir/blobs/**/*",
+				projectName: 'Build Release Blobs',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}
+
+		try{
+			params['UPDATE_DOWNLOAD_BLOBS'] && error('Updating download blobs')
+
+			copyArtifacts(
+				filter: "$repos.deployment.dir/blobs/**/*",
+				projectName: 'Download Release Blobs',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}catch(error){
+			build(
+				job: 'Download Release Blobs',
+				parameters: [
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_DEPLOYMENT_BRANCH',
+						value: params['CLOUDFOUNDRY_DEPLOYMENT_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_BRANCH']
+					],
+					[
+						$class: 'GitParameterValue',
+						name: 'CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH',
+						value: params['CLOUDFOUNDRY_ORCHESTRATION_CONFIGURATION_BRANCH']
+					],
+					booleanParam(
+						name: 'DEBUG',
+						value: params['DEBUG']
+					)
+				]
+			)
+
+			copyArtifacts(
+				filter: "$repos.deployment.dir/blobs/**/*",
+				projectName: 'Download Release Blobs',
+				fingerprintArtifacts: true,
+				selector: lastSuccessful()
+			)
+		}
+	}
+
+	stage('Deploy Cloudfoundry'){
+		withEnv(["TERM=$terminal_type"] + custom_env){
+			ansiColor(terminal_type){
+				dir(repos.deployment.dir){
+					sh "../$repos.orchestration.dir/cf/deploy_cloudfoundry.sh"
+				}
+			}
+		}
+	}
+}
+
