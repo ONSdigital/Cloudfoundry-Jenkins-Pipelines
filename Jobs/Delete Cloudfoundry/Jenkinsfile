@@ -74,11 +74,6 @@ properties([
 			useRepository: repos.config.url
 		],
 		booleanParam(
-			name: 'IGNORE_EXISTING',
-			description: 'Ignore existing brokers',
-			defaultValue: true,
-		),
-		booleanParam(
 			name: 'DEBUG',
 			description: 'Run in debug mode',
 			defaultValue: false
