@@ -86,7 +86,7 @@ properties([
 		string(
 			name: 'DIEGO_VERSION',
 			description: 'Diego release version - not required, unless you need to pin to a specific version',
-			defaultValue: ''
+			defaultValue: '1.35.0'
 		),
 		string(
 			name: 'CFLINUXFS2_ROOTFS_VERSION',
