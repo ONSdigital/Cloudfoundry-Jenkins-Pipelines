@@ -197,7 +197,7 @@ node('master'){
 				// Load properties and turn them into environmental variables
 				// Requires approval from Jenkins > Manage jenkins > In-process Script Approval
 				readProperties(file: "$repos.config.dir/${property_file}.properties").each{
-					k, v -> environment.add("$k=$v")
+					k, v -> custom_env.add("$k=$v")
 				}
 			}
 		}
