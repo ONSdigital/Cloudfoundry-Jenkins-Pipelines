@@ -216,7 +216,7 @@ node('master'){
 	stage('Archive the Artifacts'){
 		// It would have been nice if archiveArtifacts() respected the dir() enclosure, but it doesn't
 		archiveArtifacts(
-			artifacts: "$repos.buildpack.dir/go_offline-buildpack-v*.zip",
+			artifacts: "$repos.buildpack.dir/go_buildpack-cached-v*.zip",
 			fingerprint: true
 		)
 	}
