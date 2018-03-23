@@ -183,7 +183,7 @@ node('master'){
 
 	// This needs to come after the checkout, otherwise the GitSCM parameter plugin doesn't know about the repos
 	stage('Check Parameters'){
-		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/(devtest)$'){
+		if(params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH =~ '^origin/(devtest|prunes)$'){
 			error("Foot protection triggered: refusing to build $params.CLOUDFOUNDRY_DEPLOYMENT_BRANCH")
 		}
 
