@@ -87,11 +87,6 @@ properties([
 			defaultValue: true
 		),
 		booleanParam(
-			name: 'DELETE_AWS_SSH_KEY',
-			description: 'Delete AWS SSH key',
-			defaultValue: true
-		),
-		booleanParam(
 			name: 'DEBUG',
 			description: 'Run in debug mode',
 			defaultValue: false
