@@ -76,13 +76,13 @@ properties([
 			type: 'PT_BRANCH',
 			useRepository: repos.config.url
 		],
-		string(
+		password(
 			name: 'AWS_ACCESS_KEY_ID',
 			description: 'AWS Access Key ID',
 			defaultValue: ''
 		),
-		string(
-			name: 'AWS_SECRET_ACCESS_KEY',
+		password(
+			eame: 'AWS_SECRET_ACCESS_KEY',
 			description: 'AWS Secret Access Key',
 			defaultValue: ''
 		),
