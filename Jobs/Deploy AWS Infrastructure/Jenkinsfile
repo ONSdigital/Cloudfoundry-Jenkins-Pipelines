@@ -82,7 +82,7 @@ properties([
 			defaultValue: ''
 		),
 		password(
-			eame: 'AWS_SECRET_ACCESS_KEY',
+			name: 'AWS_SECRET_ACCESS_KEY',
 			description: 'AWS Secret Access Key',
 			defaultValue: ''
 		),
