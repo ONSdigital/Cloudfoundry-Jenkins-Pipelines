@@ -89,7 +89,7 @@ properties([
 			defaultValue: '1.35.0'
 		),
 		string(
-			name: 'CFLINUXFS2_ROOTFS_VERSION',
+			name: 'CFLINUXFS2_VERSION',
 			description: 'CFLinuxFS2 release version - not required, unless you need to pin to a specific version',
 			defaultValue: ''
 		),
